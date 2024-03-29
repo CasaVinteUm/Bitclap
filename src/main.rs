@@ -1,6 +1,8 @@
 use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
 use serde_derive::Deserialize;
+use std::fs::OpenOptions;
+use std::io::Write;
 
 const PROJECT_NAME: &str = "bitdevs-assistant";
 const ACCEPT_VALUE: &str = "application/vnd.github+json";
@@ -9,9 +11,14 @@ const ISSUE_NUMBER: u32 = 12;
 const ORG_NAME: &str = "lorenzolfm";
 const REPO_NAME: &str = "floripabitdevs";
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct GetIssueResponse {
     pub comments_url: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Comment {
+    pub body: String,
 }
 
 fn main() -> Result<(), reqwest::Error> {
@@ -29,12 +36,34 @@ fn main() -> Result<(), reqwest::Error> {
         .get(format!(
             "{API_URL}/repos/{ORG_NAME}/{REPO_NAME}/issues/{ISSUE_NUMBER}"
         ))
-        .headers(headers)
+        .headers(headers.clone())
         .send()?;
 
-    println!("Status: {}", response.status());
-    let body = response.text()?;
-    println!("Body:\n{}", body);
+    let res: GetIssueResponse = response.json()?;
+
+    let comments = client.get(res.comments_url).headers(headers).send()?;
+    let comments: Vec<Comment> = comments.json()?;
+
+    for comment in &comments {
+        let Some((title, url)) = comment.body.split_once("\r\n") else {
+            continue;
+        };
+
+        println!("{title}, {url}");
+    }
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("post.md")
+        .expect("Unable to open file");
+
+    for comment in &comments {
+        if let Some((title, url)) = comment.body.split_once("\r\n") {
+            writeln!(file, "* [{}]({})", title.trim(), url.trim())
+                .expect("Unable to write to file");
+        }
+    }
 
     Ok(())
 }
