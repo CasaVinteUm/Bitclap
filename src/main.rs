@@ -6,19 +6,6 @@ use serde_derive::Deserialize;
 use std::fs::OpenOptions;
 use std::io::Write;
 
-const ACCEPT_VALUE: &str = "application/vnd.github+json";
-const API_URL: &str = "https://api.github.com";
-
-#[derive(Deserialize, Debug)]
-pub struct GetIssueResponse {
-    pub comments_url: String,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct Comment {
-    pub body: String,
-}
-
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
@@ -63,15 +50,60 @@ impl Env {
     }
 }
 
-fn main() -> Result<(), reqwest::Error> {
-    let Env {
-        meetup_name,
-        meetup_chat_link,
-        gh_api_project_name,
-        gh_api_token,
-        repo_org,
-        repo_name,
-    } = Env::new();
+#[derive(Deserialize, Debug)]
+pub struct GetIssueResponse {
+    pub comments_url: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Comment {
+    pub body: String,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum GetCommentsError {
+    #[error("Reqwest: {0:?}")]
+    Reqwest(#[from] reqwest::Error),
+    #[error("Github is not returning a 200 status code")]
+    NotOk,
+    #[error("Invalid header: {0:?}")]
+    InvalidHeader(#[from] reqwest::header::InvalidHeaderValue),
+}
+
+fn get_comments(env: Env, issue_number: u16) -> Result<Vec<Comment>, GetCommentsError> {
+    const API_URL: &str = "https://api.github.com";
+    const ACCEPT_VALUE: &str = "application/vnd.github+json";
+
+    let gh_api_project_name = HeaderValue::from_str(&env.gh_api_project_name)?;
+    let gh_api_token = HeaderValue::from_str(&env.gh_api_token)?;
+
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, gh_api_project_name);
+    headers.insert(AUTHORIZATION, gh_api_token);
+    headers.insert(ACCEPT, HeaderValue::from_static(ACCEPT_VALUE));
+
+    let url = format!(
+        "{API_URL}/repos/{}/{}/issues/{issue_number}",
+        env.repo_org, env.repo_name,
+    );
+
+    let client = Client::new();
+
+    let response = client.get(url).headers(headers.clone()).send()?;
+
+    if response.status() != 200 {
+        return Err(GetCommentsError::NotOk);
+    }
+
+    let res = response.json::<GetIssueResponse>()?;
+    let comments = client.get(res.comments_url).headers(headers).send()?;
+    let comments = comments.json::<Vec<Comment>>()?;
+
+    Ok(comments)
+}
+
+fn main() -> Result<(), ()> {
+    let env = Env::new();
 
     let Args {
         meetup_number,
@@ -83,36 +115,18 @@ fn main() -> Result<(), reqwest::Error> {
     let post_prefix = format!(
         "---\nlayout: post\ntype: socratic\ntitle: \"Seminário Socrático {}\"\nmeetup: {}\n---\n\n\
         ## Avisos\n\n\
-        - Entrem no grupo do Whatsapp [{meetup_name}]({meetup_chat_link})!\n\
+        - Entrem no grupo do Whatsapp [{}]({})!\n\
         - Respeite a privacidade dos participantes.\n\
         - Os meetups nunca são gravados. Queremos todos a vontade para participar e discutir os assuntos programados, de forma anônima se assim o desejarem.\n\n\
         ## Agradecimentos\n\n\
         - Agradecemos à Vinteum pela casa, comidas e bebidas.\n\n\
         ## Cronograma\n",
-        meetup_number, meetup_link
+        meetup_number, meetup_link, env.meetup_name, env.meetup_chat_link
     );
 
-    let client = Client::new();
-    let mut headers = HeaderMap::new();
-
-    headers.insert(
-        USER_AGENT,
-        HeaderValue::from_str(&gh_api_project_name).unwrap(),
-    );
-    headers.insert(AUTHORIZATION, HeaderValue::from_str(&gh_api_token).unwrap());
-    headers.insert(ACCEPT, HeaderValue::from_static(ACCEPT_VALUE));
-
-    let response = client
-        .get(format!(
-            "{API_URL}/repos/{repo_org}/{repo_name}/issues/{issue_number}",
-        ))
-        .headers(headers.clone())
-        .send()?;
-
-    let res: GetIssueResponse = response.json()?;
-
-    let comments = client.get(res.comments_url).headers(headers).send()?;
-    let comments: Vec<Comment> = comments.json()?;
+    let comments = get_comments(env, issue_number).map_err(|e| {
+        eprintln!("Error: {}", e);
+    })?;
 
     let file_name = format!("{meetup_date}-socratic-seminar-{meetup_number}.md");
 
