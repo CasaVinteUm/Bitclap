@@ -134,7 +134,9 @@ fn write_post_markdown(env: Env, p: WritePostMarkdownParams) -> Result<(), std::
     writeln!(file, "{}", post_prefix)?;
 
     for comment in &p.comments {
-        if let Some((title, url)) = comment.body.split_once("\r\n") {
+        if let Some((title, raw_url)) = comment.body.split_once("\r\n") {
+            let url = raw_url.split_whitespace().next().unwrap_or("");
+
             writeln!(file, "* [{}]({})", title.trim(), url.trim())?;
         }
     }
