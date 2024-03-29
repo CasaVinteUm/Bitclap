@@ -33,21 +33,45 @@ struct Args {
     issue_number: u16,
 }
 
+struct Env {
+    pub meetup_name: String,
+    pub meetup_chat_link: String,
+
+    pub gh_api_project_name: String,
+    pub gh_api_token: String,
+
+    pub repo_org: String,
+    pub repo_name: String,
+}
+
+impl Env {
+    fn new() -> Env {
+        dotenv().ok();
+
+        Env {
+            meetup_name: std::env::var("MEETUP_NAME")
+                .expect("MEETUP_NAME environment variable not set"),
+            meetup_chat_link: std::env::var("MEETUP_CHAT_LINK")
+                .expect("MEETUP_CHAT_LINK environment variable not set"),
+            gh_api_project_name: std::env::var("GH_API_PROJECT_NAME")
+                .expect("GH_API_PROJECT_NAME environment variable not set"),
+            gh_api_token: std::env::var("GH_API_TOKEN")
+                .expect("GH_API_TOKEN environment variable not set"),
+            repo_org: std::env::var("REPO_ORG").expect("REPO_ORG environment variable not set"),
+            repo_name: std::env::var("REPO_NAME").expect("REPO_NAME environment variable not set"),
+        }
+    }
+}
+
 fn main() -> Result<(), reqwest::Error> {
-    dotenv().ok();
-
-    let meetup_name =
-        std::env::var("MEETUP_NAME").expect("PROJECT_NAME environment variable not set");
-    let meetup_chat_link =
-        std::env::var("MEETUP_CHAT_LINK").expect("PROJECT_NAME environment variable not set");
-
-    let gh_api_project_name =
-        std::env::var("GH_API_PROJECT_NAME").expect("PROJECT_NAME environment variable not set");
-    let gh_api_token =
-        std::env::var("GH_API_TOKEN").expect("GITHUB_TOKEN environment variable not set");
-
-    let repo_org = std::env::var("REPO_ORG").expect("GITHUB_TOKEN environment variable not set");
-    let repo_name = std::env::var("REPO_NAME").expect("GITHUB_TOKEN environment variable not set");
+    let Env {
+        meetup_name,
+        meetup_chat_link,
+        gh_api_project_name,
+        gh_api_token,
+        repo_org,
+        repo_name,
+    } = Env::new();
 
     let Args {
         meetup_number,
