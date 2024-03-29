@@ -20,6 +20,7 @@ struct Args {
     issue_number: u16,
 }
 
+#[derive(Clone)]
 struct Env {
     pub meetup_name: String,
     pub meetup_chat_link: String,
@@ -64,10 +65,10 @@ pub struct Comment {
 pub enum GetCommentsError {
     #[error("Reqwest: {0:?}")]
     Reqwest(#[from] reqwest::Error),
-    #[error("Github is not returning a 200 status code")]
-    NotOk,
     #[error("Invalid header: {0:?}")]
     InvalidHeader(#[from] reqwest::header::InvalidHeaderValue),
+    #[error("Github is not returning a 200 status code")]
+    NotOk,
 }
 
 fn get_comments(env: Env, issue_number: u16) -> Result<Vec<Comment>, GetCommentsError> {
@@ -102,6 +103,45 @@ fn get_comments(env: Env, issue_number: u16) -> Result<Vec<Comment>, GetComments
     Ok(comments)
 }
 
+struct WritePostMarkdownParams {
+    meetup_date: String,
+    meetup_number: u16,
+    meetup_link: String,
+    comments: Vec<Comment>,
+}
+
+fn write_post_markdown(env: Env, p: WritePostMarkdownParams) -> Result<(), std::io::Error> {
+    let post_prefix = format!(
+        "---\nlayout: post\ntype: socratic\ntitle: \"Seminário Socrático {}\"\nmeetup: {}\n---\n\n\
+        ## Avisos\n\n\
+        - Entrem no grupo do Whatsapp [{}]({})!\n\
+        - Respeite a privacidade dos participantes.\n\
+        - Os meetups nunca são gravados. Queremos todos a vontade para participar e discutir os assuntos programados, de forma anônima se assim o desejarem.\n\n\
+        ## Agradecimentos\n\n\
+        - Agradecemos à Vinteum pela casa, comidas e bebidas.\n\n\
+        ## Cronograma\n",
+        p.meetup_number, p.meetup_link, env.meetup_name, env.meetup_chat_link
+    );
+
+    let file_name = format!("{}-socratic-seminar-{}.md", p.meetup_date, p.meetup_number);
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&file_name)?;
+
+    writeln!(file, "{}", post_prefix)?;
+
+    for comment in &p.comments {
+        if let Some((title, url)) = comment.body.split_once("\r\n") {
+            writeln!(file, "* [{}]({})", title.trim(), url.trim())?;
+        }
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<(), ()> {
     let env = Env::new();
 
@@ -112,38 +152,22 @@ fn main() -> Result<(), ()> {
         issue_number,
     } = Args::parse();
 
-    let post_prefix = format!(
-        "---\nlayout: post\ntype: socratic\ntitle: \"Seminário Socrático {}\"\nmeetup: {}\n---\n\n\
-        ## Avisos\n\n\
-        - Entrem no grupo do Whatsapp [{}]({})!\n\
-        - Respeite a privacidade dos participantes.\n\
-        - Os meetups nunca são gravados. Queremos todos a vontade para participar e discutir os assuntos programados, de forma anônima se assim o desejarem.\n\n\
-        ## Agradecimentos\n\n\
-        - Agradecemos à Vinteum pela casa, comidas e bebidas.\n\n\
-        ## Cronograma\n",
-        meetup_number, meetup_link, env.meetup_name, env.meetup_chat_link
-    );
-
-    let comments = get_comments(env, issue_number).map_err(|e| {
-        eprintln!("Error: {}", e);
+    let comments = get_comments(env.clone(), issue_number).map_err(|e| {
+        eprintln!("Failed to get comments: {}", e);
     })?;
 
-    let file_name = format!("{meetup_date}-socratic-seminar-{meetup_number}.md");
-
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&file_name)
-        .expect("Unable to open file");
-
-    writeln!(file, "{}", post_prefix).expect("Unable to write to file");
-
-    for comment in &comments {
-        if let Some((title, url)) = comment.body.split_once("\r\n") {
-            writeln!(file, "* [{}]({})", title.trim(), url.trim())
-                .expect("Unable to write to file");
-        }
-    }
+    write_post_markdown(
+        env,
+        WritePostMarkdownParams {
+            meetup_date,
+            meetup_number,
+            meetup_link,
+            comments,
+        },
+    )
+    .map_err(|e| {
+        eprintln!("Failed to write md file: {}", e);
+    })?;
 
     Ok(())
 }
