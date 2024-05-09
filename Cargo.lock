@@ -102,6 +102,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "thiserror",
+ "url",
 ]
 
 [[package]]

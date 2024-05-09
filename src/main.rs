@@ -110,7 +110,17 @@ struct WritePostMarkdownParams {
     comments: Vec<Comment>,
 }
 
-fn write_post_markdown(env: Env, p: WritePostMarkdownParams) -> Result<(), std::io::Error> {
+#[derive(thiserror::Error, Debug)]
+pub enum WritePostMarkdownError {
+    #[error("Io failed: {0:?}")]
+    Io(#[from] std::io::Error),
+    #[error("Failed to parse as url: {0:?}")]
+    Parse(#[from] url::ParseError),
+    #[error("Missing domain")]
+    Domain,
+}
+
+fn write_post_markdown(env: Env, p: WritePostMarkdownParams) -> Result<(), WritePostMarkdownError> {
     let post_prefix = format!(
         "---\nlayout: post\ntype: socratic\ntitle: \"Seminário Socrático {}\"\nmeetup: {}\n---\n\n\
         ## Avisos\n\n\
@@ -134,10 +144,22 @@ fn write_post_markdown(env: Env, p: WritePostMarkdownParams) -> Result<(), std::
     writeln!(file, "{}", post_prefix)?;
 
     for comment in &p.comments {
-        if let Some((title, raw_url)) = comment.body.split_once("\r\n") {
-            let url = raw_url.split_whitespace().next().unwrap_or("");
+        let mut lines = comment.body.split("\r\n").filter(|l| !l.is_empty());
 
-            writeln!(file, "* [{}]({})", title.trim(), url.trim())?;
+        if let Some(title) = lines.next() {
+            if let Some(first_url) = lines.next() {
+                writeln!(file, "* [{}]({})", title.trim(), first_url.trim())?;
+
+                for url in lines {
+                    let url = url.parse::<url::Url>()?;
+
+                    let Some(domain) = url.domain() else {
+                        return Err(WritePostMarkdownError::Domain);
+                    };
+
+                    writeln!(file, "    - [{}]({})", domain, url.to_string())?;
+                }
+            }
         }
     }
 
