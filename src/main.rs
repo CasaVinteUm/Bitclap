@@ -151,7 +151,10 @@ fn write_post_markdown(env: Env, p: WritePostMarkdownParams) -> Result<(), Write
                 writeln!(file, "* [{}]({})", title.trim(), first_url.trim())?;
 
                 for url in lines {
-                    let url = url.parse::<url::Url>()?;
+                    let url = match url.parse::<url::Url>() {
+                        Ok(url) => url,
+                        Err(_) => continue,
+                    };
 
                     let Some(domain) = url.domain() else {
                         return Err(WritePostMarkdownError::Domain);
